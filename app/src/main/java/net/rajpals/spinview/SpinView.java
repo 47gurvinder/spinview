@@ -12,6 +12,7 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.support.annotation.DrawableRes;
 import android.support.annotation.Nullable;
+import android.support.v4.content.ContextCompat;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -38,20 +39,26 @@ public class SpinView extends View {
 
     private static final long DEFAULT_SPIN_TIME = 7000;
     private static final int RANDOM_ANGLE_LIMIT = 3000;
+    private static final float DEFAULT_STROKE_WIDTH = 8;
+    private static final float DEFAULT_DIVIDER_LINE_SIZE = 4;
     Paint linePaint;
     private int[] mImageList = new int[]{};
     private RectF mViewBounds = new RectF();
     private int mDesiredHeight = 300;
     private int mDesiredWidth = 300;
     private int mCenterCircleRadius = 24;
-
+    private int mStartAngle = -90;
     private int mLastAngle = 0;
     private static final int MINIMUM_ANGLE = 360 * 2;
     private boolean showSelectedItem;
-    private int mStartAngle = -90;
+
 
     private String LOGTAG = "SpinView";
     private GestureDetector mGestureDetector;
+    private float mStrokeWidth = DEFAULT_STROKE_WIDTH;
+    private float mDividerLineSize = DEFAULT_DIVIDER_LINE_SIZE;
+    private boolean isRotating;
+    private OnSpinChangeListener mOnSpinChangeListener;
 
     public SpinView(Context context) {
         super(context);
@@ -77,7 +84,6 @@ public class SpinView extends View {
 
         updateView();
         mGestureDetector = new GestureDetector(getContext(), new SwipeGestureDetector());
-
     }
 
     private void updateView() {
@@ -105,7 +111,7 @@ public class SpinView extends View {
         shader.setLocalMatrix(m);
         paint.setShader(shader);
         m.mapRect(imageBound, src);
-        float oneAngle = (float) ((float) 360 / (float) items);
+        float oneAngle = getUnitAngle();
         float start = (itemNumber * oneAngle) - oneAngle;
         canvas.drawArc(imageBound, mStartAngle + start, oneAngle, true, paint);
     }
@@ -128,8 +134,10 @@ public class SpinView extends View {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Color.argb(180, 255, 0, 0));
-        float unit = (float) 360 / (float) mImageList.length;
+        float unit = getUnitAngle();
+
         float start = 0 - ((getSelectedItem() - 1) * unit) - unit;
+
         canvas.drawArc(mViewBounds, mStartAngle + start, unit, true, paint);
     }
 
@@ -159,14 +167,36 @@ public class SpinView extends View {
     public void setImageList(@DrawableRes int[] images) {
         this.mImageList = images;
         invalidate();
+        adjustSpinnerCenter(true);
     }
+
 
     private void drawMenuItems(Canvas canvas) {
         float[] angles = getAngles(mImageList.length);
         for (int i = 0; i < angles.length; i++) {
             Bitmap b = getBitmapFromResId(mImageList[i]);
+//            Bitmap b = getBitmapFromResColorId(mImageList[i]);
+            //  Bitmap  b =generateRandomBitmap();
             createItemOval(b, canvas, mImageList.length, i + 1);
         }
+    }
+
+    private Bitmap getBitmapFromResColorId(int resId) {
+        Bitmap bmp = Bitmap.createBitmap(getWidth(), getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        int color = ContextCompat.getColor(getContext(), resId);
+        canvas.drawColor(color);
+        return bmp;
+    }
+
+    private Bitmap generateRandomBitmap() {
+        Bitmap bmp = Bitmap.createBitmap(getWidth(), getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        Random rnd = new Random();
+        int color = Color.argb(255, rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256));
+        canvas.drawColor(color);
+//        canvas.drawText();
+        return bmp;
     }
 
     private Bitmap getBitmapFromResId(int resId) {
@@ -176,7 +206,7 @@ public class SpinView extends View {
     private void drawLines(Canvas canvas) {
         Paint paintLine = new Paint();
         paintLine.setColor(Color.LTGRAY);
-        paintLine.setStrokeWidth(3);
+        paintLine.setStrokeWidth(mDividerLineSize);
         int centerX = (int) mViewBounds.right / 2;
         int centerY = (int) mViewBounds.bottom / 2;
         PointP[] pointP = getLinePoints(mImageList.length);
@@ -209,8 +239,8 @@ public class SpinView extends View {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setStyle(Paint.Style.STROKE);
         paint.setColor(Color.LTGRAY);
-        paint.setStrokeWidth(8);
-        int strokeSize = 8 / 2;
+        paint.setStrokeWidth(mStrokeWidth);
+        int strokeSize = (int) mStrokeWidth / 2;
         RectF imageBound = new RectF(mViewBounds.left + strokeSize, mViewBounds.top + strokeSize, mViewBounds.right - strokeSize, mViewBounds.bottom - strokeSize);
         canvas.drawArc(imageBound, mStartAngle + 0, 360, true, paint);
     }
@@ -245,6 +275,8 @@ public class SpinView extends View {
     }
 
     public void spin() {
+        if (isRotating)
+            return;
         Random random = new Random();
         int randomNumber = random.nextInt(RANDOM_ANGLE_LIMIT);
         int angle = randomNumber + mLastAngle + MINIMUM_ANGLE;
@@ -252,14 +284,31 @@ public class SpinView extends View {
 
     }
 
-    private void adjustSpinnerCenter() {
+    public float getItemEndAngle() {
         float unit = getUnitAngle();
+        if (getItemStartAngle() == 0) {
+            return getItemStartAngle() + unit;
+        }
+        return getItemStartAngle() + Math.signum(getItemStartAngle()) * unit;
 
+    }
 
+    public float getItemStartAngle() {
+        float unit = getUnitAngle();
         int divider = (int) ((float) mLastAngle / unit);
+        return divider * unit;
+    }
 
-        float startAngle = divider * unit;
-        float endAngle = startAngle + Math.signum(startAngle) * unit;
+    private void adjustSpinnerCenter() {
+        adjustSpinnerCenter(false);
+    }
+
+    private void adjustSpinnerCenter(final boolean bySystem) {
+        float unit = getUnitAngle();
+        //  int divider = (int) ((float) mLastAngle / unit);
+
+        float startAngle = getItemStartAngle();// divider * unit;
+        float endAngle = getItemEndAngle();//startAngle + Math.signum(startAngle) * unit;
         int centerAngle = (int) (startAngle + ((endAngle - startAngle) / 2));
 
 
@@ -267,6 +316,24 @@ public class SpinView extends View {
         rotate.setInterpolator(new AccelerateDecelerateInterpolator());
         rotate.setFillAfter(true);
         rotate.setDuration(1000);
+        rotate.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                isRotating = false;
+                if (mOnSpinChangeListener != null && !bySystem)
+                    mOnSpinChangeListener.onComplete(getSelectedItem());
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+
+            }
+        });
         startAnimation(rotate);
         mLastAngle = centerAngle;
     }
@@ -285,7 +352,7 @@ public class SpinView extends View {
     public int getSelectedItem() {
 
         float unit = getUnitAngle();
-
+        float aa = getAngle();
         if ((getAngle() < unit && getAngle() >= 0))
             return 1;
         else if ((getAngle() <= 0 && getAngle() > unit))
@@ -380,6 +447,8 @@ public class SpinView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (isRotating)
+            return true;
         mGestureDetector.onTouchEvent(event);
         return true;
     }
@@ -490,6 +559,9 @@ public class SpinView extends View {
         rotate.setAnimationListener(new Animation.AnimationListener() {
             @Override
             public void onAnimationStart(Animation animation) {
+                isRotating = true;
+                if (mOnSpinChangeListener != null)
+                    mOnSpinChangeListener.onStart();
             }
 
             @Override
@@ -526,6 +598,35 @@ public class SpinView extends View {
                 break;
         }
         return distance;
+    }
+
+    public void setStrokeWidth(float strokeWidth) {
+        mStrokeWidth = strokeWidth;
+        invalidate();
+    }
+
+    public void setDividerLineSize(float dividerLineSize) {
+        mDividerLineSize = dividerLineSize;
+        invalidate();
+    }
+
+    public void setShowDefaultSelectedItem(boolean enable) {
+        showSelectedItem = enable;
+        invalidate();
+    }
+
+    public boolean isRotating() {
+        return isRotating;
+    }
+
+    public interface OnSpinChangeListener {
+        void onStart();
+
+        void onComplete(int selectedPosition);
+    }
+
+    public void setOnSpinChangeListener(OnSpinChangeListener onSpinChangeListener) {
+        mOnSpinChangeListener = onSpinChangeListener;
     }
 
     /**

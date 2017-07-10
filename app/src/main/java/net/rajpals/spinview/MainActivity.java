@@ -35,7 +35,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        int[] ints = new int[]{
+       int[] ints = new int[]{
                 R.drawable.bg1,
                 R.drawable.bg2,
                 R.drawable.bg3,
@@ -49,7 +49,36 @@ public class MainActivity extends AppCompatActivity {
                 R.drawable.bg11,
                 R.drawable.bg12
         };
+        /*int[] ints = new int[]{
+                R.color.color1,
+                R.color.color2,
+                R.color.color3,
+                R.color.color4,
+                R.color.color5,
+                R.color.color6,
+                R.color.color7,
+                R.color.color8,
+                R.color.color9,
+                R.color.color10,
+                R.color.color11,
+                R.color.color12
+        };*/
+
+        mSpinView.setShowDefaultSelectedItem(true);
         mSpinView.setImageList(ints);
+        mSpinView.setOnSpinChangeListener(new SpinView.OnSpinChangeListener() {
+            @Override
+            public void onStart() {
+                Toast.makeText(getApplicationContext(), "onStart", Toast.LENGTH_SHORT).show();
+
+            }
+
+            @Override
+            public void onComplete(int selectedPosition) {
+                Toast.makeText(getApplicationContext(), "onComplete: "+selectedPosition, Toast.LENGTH_SHORT).show();
+
+            }
+        });
 
 
     }
