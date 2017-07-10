@@ -13,11 +13,18 @@ import android.graphics.Shader;
 import android.support.annotation.DrawableRes;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
+import android.util.Log;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.Animation;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.Interpolator;
 import android.view.animation.RotateAnimation;
+
+import net.rajpals.spinview.enums.Direction;
 
 import java.util.Random;
 
@@ -29,18 +36,22 @@ import java.util.Random;
 public class SpinView extends View {
 
 
+    private static final long DEFAULT_SPIN_TIME = 7000;
+    private static final int RANDOM_ANGLE_LIMIT = 3000;
     Paint linePaint;
     private int[] mImageList = new int[]{};
     private RectF mViewBounds = new RectF();
     private int mDesiredHeight = 300;
     private int mDesiredWidth = 300;
     private int mCenterCircleRadius = 24;
-    private int mNewAngle;
+
     private int mLastAngle = 0;
     private static final int MINIMUM_ANGLE = 360 * 2;
     private boolean showSelectedItem;
     private int mStartAngle = -90;
-    private int multiRatio = 0;
+
+    private String LOGTAG = "SpinView";
+    private GestureDetector mGestureDetector;
 
     public SpinView(Context context) {
         super(context);
@@ -60,13 +71,13 @@ public class SpinView extends View {
     private void initView() {
 
         mViewBounds = new RectF(0, 0, mDesiredWidth, mDesiredHeight);
-
-
         linePaint = new Paint();
         linePaint.setColor(Color.GREEN);
         linePaint.setStrokeWidth(4);
 
         updateView();
+        mGestureDetector = new GestureDetector(getContext(), new SwipeGestureDetector());
+
     }
 
     private void updateView() {
@@ -79,7 +90,6 @@ public class SpinView extends View {
     protected void onSizeChanged(int width, int height, int oldw, int oldh) {
         mViewBounds.right = width;
         mViewBounds.bottom = width;
-        //  updateView();
         invalidate();
 
     }
@@ -119,7 +129,6 @@ public class SpinView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Color.argb(180, 255, 0, 0));
         float unit = (float) 360 / (float) mImageList.length;
-//        float start = (((getSelectedItem()-1)*unit)-unit)-getAngle();
         float start = 0 - ((getSelectedItem() - 1) * unit) - unit;
         canvas.drawArc(mViewBounds, mStartAngle + start, unit, true, paint);
     }
@@ -237,41 +246,22 @@ public class SpinView extends View {
 
     public void spin() {
         Random random = new Random();
-        int randomNumber = random.nextInt(3000);
-        mNewAngle = randomNumber + mLastAngle + MINIMUM_ANGLE;
-        RotateAnimation rotate = new RotateAnimation(mLastAngle, mNewAngle, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
-        rotate.setInterpolator(new AccelerateDecelerateInterpolator());
-        rotate.setFillAfter(true);
-        rotate.setDuration(7000);
-        rotate.setAnimationListener(new Animation.AnimationListener() {
-            @Override
-            public void onAnimationStart(Animation animation) {
-            }
+        int randomNumber = random.nextInt(RANDOM_ANGLE_LIMIT);
+        int angle = randomNumber + mLastAngle + MINIMUM_ANGLE;
+        animateSpinner(angle, DEFAULT_SPIN_TIME, new AccelerateDecelerateInterpolator());
 
-            @Override
-            public void onAnimationEnd(Animation animation) {
-                showSelectedItem = true;
-                invalidate();
-                moveToCenter();
-            }
-
-            @Override
-            public void onAnimationRepeat(Animation animation) {
-
-            }
-        });
-        showSelectedItem = false;
-        startAnimation(rotate);
-        mLastAngle = mNewAngle;
     }
 
-    private void moveToCenter() {
-        int item = getSelectedItem();
-        float[] angles = getAngleItem(item);
-        float startAngle = angles[0] + multiRatio * 360;
-        float endAngle = angles[1] + multiRatio * 360;
-        int centerAngle = (int) (angles[0] + ((angles[1] - angles[0]) / 2)) + multiRatio * 360;
-        ;
+    private void adjustSpinnerCenter() {
+        float unit = getUnitAngle();
+
+
+        int divider = (int) ((float) mLastAngle / unit);
+
+        float startAngle = divider * unit;
+        float endAngle = startAngle + Math.signum(startAngle) * unit;
+        int centerAngle = (int) (startAngle + ((endAngle - startAngle) / 2));
+
 
         RotateAnimation rotate = new RotateAnimation(mLastAngle, centerAngle, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
         rotate.setInterpolator(new AccelerateDecelerateInterpolator());
@@ -281,9 +271,12 @@ public class SpinView extends View {
         mLastAngle = centerAngle;
     }
 
-    private float[] getAngleItem(int item) {
-        float unit = ((float) 360 / (float) (mImageList.length));
+    private float getUnitAngle() {
+        return ((float) 360 / (float) (mImageList.length));
+    }
 
+    private float[] getAngleItem(int item) {
+        float unit = getUnitAngle();
         float endAngle = item * unit;
         float startAngle = endAngle - unit;
         return new float[]{startAngle, endAngle};
@@ -291,13 +284,24 @@ public class SpinView extends View {
 
     public int getSelectedItem() {
 
-        float unit = ((float) 360 / (float) (mImageList.length));
-        if (getAngle() <= unit)
+        float unit = getUnitAngle();
+
+        if ((getAngle() < unit && getAngle() >= 0))
             return 1;
+        else if ((getAngle() <= 0 && getAngle() > unit))
+            return mImageList.length;
         int item = (int) (getAngle() / unit);
         int rem = (int) (getAngle() % unit);
-        if (rem != 0)
-            item = item + 1;
+        if (rem != 0 && rem > 0)
+            item = item + (int) Math.signum(item);
+        item = resolveItem(item);
+        return item;
+    }
+
+    private int resolveItem(int item) {
+        if (item < 0) {
+            return mImageList.length + item;
+        }
         return item;
     }
 
@@ -307,13 +311,18 @@ public class SpinView extends View {
     }
 
     private float calculateAngle(float angle) {
-        multiRatio = 0;
-        while (angle > 360) {
-            angle -= 360;
-            multiRatio++;
+        if (angle < 0) {
+            while (angle < -360) {
+                angle += 360;
+            }
+        } else {
+            while (angle > 360) {
+                angle -= 360;
+            }
         }
         return angle;
     }
+
 
     private class PointP {
         float x;
@@ -357,7 +366,8 @@ public class SpinView extends View {
             //Be whatever you want
             height = desiredHeight;
         }
-/*According to our requirements*/
+
+        /*According to our requirements*/
         height = width;
 
         //MUST CALL THIS
@@ -368,5 +378,171 @@ public class SpinView extends View {
         invalidate();
     }
 
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        mGestureDetector.onTouchEvent(event);
+        return true;
+    }
+
+
+    private class SwipeGestureDetector extends GestureDetector.SimpleOnGestureListener {
+        @Override
+        public boolean onDown(MotionEvent e) {
+            return super.onDown(e);
+        }
+
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+
+            Direction direction = getSlope(e1.getX(), e1.getY(), e2.getX(), e2.getY());
+            float distance = getDistance(direction, e1, e2);
+            float velocity = 0;
+            int centerX = getWidth() / 2;
+            int centerY = getHeight() / 2;
+            int rotationDirection = 1;
+            switch (direction) {
+                case TOP:
+                    Log.d(LOGTAG, "top");
+                    velocity = velocityY;
+                    if (e1.getX() < centerX)
+                        rotationDirection = 1;
+                    else
+                        rotationDirection = -1;
+                    updateSpinner(rotationDirection, distance, velocity);
+                    return true;
+                case LEFT:
+
+
+                    velocity = velocityX;
+                    if (e1.getY() < centerY)
+                        rotationDirection = -1;
+                    else
+                        rotationDirection = 1;
+                    updateSpinner(rotationDirection, distance, velocity);
+
+                    Log.d(LOGTAG, "left");
+                    return true;
+                case BOTTOM:
+                    velocity = velocityY;
+                    if (e1.getX() < centerX)
+                        rotationDirection = -1;
+                    else
+                        rotationDirection = 1;
+                    updateSpinner(rotationDirection, distance, velocity);
+                    Log.d(LOGTAG, "down");
+                    return true;
+                case RIGHT:
+                    velocity = velocityX;
+                    if (e1.getY() < centerY)
+                        rotationDirection = 1;
+                    else
+                        rotationDirection = -1;
+                    updateSpinner(rotationDirection, distance, velocity);
+
+                    Log.d(LOGTAG, "right");
+                    return true;
+            }
+            return false;
+        }
+
+        private Direction getSlope(float x1, float y1, float x2, float y2) {
+            Double angle = Math.toDegrees(Math.atan2(y1 - y2, x2 - x1));
+            if (angle > 45 && angle <= 135)
+                // top
+                return Direction.TOP;
+            if (angle >= 135 && angle < 180 || angle < -135 && angle > -180)
+                // left
+                return Direction.LEFT;
+            if (angle < -45 && angle >= -135)
+                // down
+                return Direction.BOTTOM;
+            if (angle > -45 && angle <= 45)
+                // right
+                return Direction.RIGHT;
+            return Direction.UNDEFINED;
+        }
+
+    }
+
+    private void updateSpinner(int rotationDirection, float distance, float velocity) {
+        long time = (long) (distance * 10);
+        velocity = (int) velocity / 5;
+        Interpolator interpolator = new DecelerateInterpolator();
+        velocity = resolveRotationDirection(rotationDirection, velocity);
+        int angle = (int) velocity + mLastAngle;
+        animateSpinner(angle, time, interpolator);
+        Log.e("updateSpinner", "dis: " + distance + " v:" + velocity + " time: " + time);
+//        Toast.makeText(getContext(), "dis: " + distance + " v: " + velocity + " time: " + time, Toast.LENGTH_SHORT).show();
+    }
+
+    private float resolveRotationDirection(int rotationDirection, float angle) {
+        angle = Math.abs(angle);
+        return angle * rotationDirection;
+
+
+    }
+
+    private void animateSpinner(int angle, long duration, Interpolator interpolator) {
+        RotateAnimation rotate = new RotateAnimation(mLastAngle, angle, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+        rotate.setInterpolator(interpolator);
+        rotate.setFillAfter(true);
+        rotate.setDuration(duration);
+        rotate.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                showSelectedItem = true;
+                invalidate();
+                adjustSpinnerCenter();
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+
+            }
+        });
+        showSelectedItem = false;
+        startAnimation(rotate);
+        mLastAngle = angle;
+    }
+
+    private float getDistance(Direction direction, MotionEvent e1, MotionEvent e2) {
+        float distance = 0;
+        switch (direction) {
+            case TOP:
+                distance = Math.abs(e1.getY() - e2.getY());
+                break;
+            case LEFT:
+                distance = Math.abs(e1.getX() - e2.getX());
+                break;
+            case BOTTOM:
+                distance = Math.abs(e1.getY() - e2.getY());
+                break;
+            case RIGHT:
+                distance = Math.abs(e1.getX() - e2.getX());
+                break;
+        }
+        return distance;
+    }
+
+    /**
+     * Finds the angle between two points in the plane (x1,y1) and (x2, y2)
+     * The angle is measured with 0/360 being the X-axis to the right, angles
+     * increase counter clockwise.
+     *
+     * @param x1 the x position of the first point
+     * @param y1 the y position of the first point
+     * @param x2 the x position of the second point
+     * @param y2 the y position of the second point
+     * @return the angle between two points
+     */
+    public double getAngle(float x1, float y1, float x2, float y2) {
+
+        double rad = Math.atan2(y1 - y2, x2 - x1) + Math.PI;
+        return (rad * 180 / Math.PI + 180) % 360;
+    }
 
 }
